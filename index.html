@@ -24,7 +24,7 @@ input,select,textarea{width:100%;padding:12px 13px;border:1px solid #dce4f1;bord
 <nav class="nav">
 <button class="active" data-page="dashboard">لوحة التحكم</button><button data-page="items">الأصناف</button><button data-page="received">إذن إضافة مخزون</button><button data-page="issued">إذن صرف مخزون</button><button data-page="alerts">تنبيهات النواقص</button>
 </nav></aside>
-<main><div class="top"><div class="page-heading"><div class="vacsera-logo">VACSERA</div><div><div class="muted" style="font-weight:bold;color:#4169e1;margin-bottom:3px">مخزن شلل الأطفال</div><h1 id="pageTitle">لوحة التحكم</h1><div class="muted">متابعة الأصناف وحركة المخزون من مكان واحد</div></div></div><div class="filters"><span id="syncStatus" class="sync-status">في انتظار الاتصال…</span><button class="btn secondary" id="exportBtn">تصدير البيانات CSV</button><button class="btn secondary" id="resetBtn">إعادة بيانات الملف الأصلية</button></div></div>
+<main><div class="top"><div class="page-heading"><div class="vacsera-logo">VACSERA</div><div><div class="muted" style="font-weight:bold;color:#4169e1;margin-bottom:3px">مخزن شلل الأطفال</div><h1 id="pageTitle">لوحة التحكم</h1><div class="muted">متابعة الأصناف وحركة المخزون من مكان واحد</div></div></div><div class="filters"><span id="syncStatus" class="sync-status">جاري التحميل...</span><button class="btn secondary" id="exportBtn">تصدير البيانات CSV</button><button class="btn secondary" id="resetBtn">إعادة بيانات الملف الأصلية</button></div></div>
 <div class="notice">البيانات محفوظة سحابيًا عبر Supabase، وتظهر التعديلات على الأجهزة الأخرى بعد المزامنة. احتفظ بنسخة CSV احتياطية بشكل دوري.</div>
 <section id="dashboard" class="page">
 <div class="cards"><div class="card"><div class="metric-label">إجمالي الأصناف</div><div class="metric blue" id="mItems">0</div></div><div class="card"><div class="metric-label">أصناف وصلت لحد الطلب</div><div class="metric red" id="mLow">0</div></div><div class="card"><div class="metric-label">إجمالي الوارد</div><div class="metric green" id="mIn">0</div></div><div class="card"><div class="metric-label">إجمالي المنصرف</div><div class="metric" id="mOut">0</div></div></div>
@@ -56,51 +56,176 @@ document.querySelectorAll('input[placeholder*="بحث"],input[placeholder*="اب
 
 let state = loadState(), editCode = null;
 let cloudReady = false, applyingRemote = false, saveQueue = Promise.resolve(), realtimeChannel = null;
-function loadState(){try{return JSON.parse(localStorage.getItem('inventory-system-data'))||JSON.parse(JSON.stringify(original))}catch(e){return JSON.parse(JSON.stringify(original))}}
-function setSyncStatus(message, kind=''){const el=document.getElementById('syncStatus');if(el){el.textContent=message;el.className='sync-status '+kind}}
-function save(){localStorage.setItem('inventory-system-data',JSON.stringify(state));renderAll();if(cloudReady&&!applyingRemote){const snapshot=JSON.parse(JSON.stringify(state));saveQueue=saveQueue.then(async()=>{const {error}=await supabase.from('inventory_app_state').upsert({id:1,state:snapshot,updated_at:new Date().toISOString()},{onConflict:'id'});if(error){console.error(error);setSyncStatus('تعذرت المزامنة — تحقق من الاتصال','err')}else setSyncStatus('تمت المزامنة السحابية','ok')}).catch(err=>{console.error(err);setSyncStatus('خطأ في المزامنة','err')})}}
-async function loadCloudState(){
-  setSyncStatus('جاري تحميل بيانات المخزن…');
-  const {data,error}=await supabase.from('inventory_app_state').select('state').eq('id',1).maybeSingle();
-  if(error)throw error;
-  if(data&&data.state&&Array.isArray(data.state.items)){
-    state=data.state;localStorage.setItem('inventory-system-data',JSON.stringify(state));
-  }else{
-    await supabase.from('inventory_app_state').upsert({id:1,state:state,updated_at:new Date().toISOString()},{onConflict:'id'});
+
+function loadState(){
+  try{
+    return JSON.parse(localStorage.getItem('inventory-system-data')) || JSON.parse(JSON.stringify(original));
+  }catch(e){
+    return JSON.parse(JSON.stringify(original));
   }
-  cloudReady=true;renderAll();setSyncStatus('متصل — البيانات متزامنة','ok');
-  if(realtimeChannel)await supabase.removeChannel(realtimeChannel);
-  realtimeChannel=supabase.channel('inventory-state-sync').on('postgres_changes',{event:'UPDATE',schema:'public',table:'inventory_app_state',filter:'id=eq.1'},payload=>{
-    if(!payload.new?.state||!Array.isArray(payload.new.state.items))return;
-    applyingRemote=true;state=payload.new.state;localStorage.setItem('inventory-system-data',JSON.stringify(state));renderAll();applyingRemote=false;setSyncStatus('تم تحديث البيانات من جهاز آخر','ok');
-  }).subscribe();
 }
-loadCloudState().catch(err=>{console.error(err);setSyncStatus('وضع العمل المحلي فقط','err')});
+
+function setSyncStatus(message, kind=''){
+  const el=document.getElementById('syncStatus');
+  if(el){el.textContent=message;el.className='sync-status '+kind}
+}
+
+function save(){
+  localStorage.setItem('inventory-system-data',JSON.stringify(state));
+  renderAll();
+  if(cloudReady&&!applyingRemote){
+    const snapshot=JSON.parse(JSON.stringify(state));
+    saveQueue=saveQueue.then(async()=>{
+      const {error}=await supabase.from('inventory_app_state').upsert({id:1,state:snapshot,updated_at:new Date().toISOString()},{onConflict:'id'});
+      if(error){console.error(error);setSyncStatus('تعذرت المزامنة — تحقق من الاتصال','err')}
+      else setSyncStatus('تمت المزامنة السحابية','ok')
+    }).catch(err=>{console.error(err);setSyncStatus('خطأ في المزامنة','err')})
+  }
+}
+
+async function loadCloudState(){
+  try {
+    setSyncStatus('جاري التحميل...');
+    const {data,error}=await supabase.from('inventory_app_state').select('state').eq('id',1).maybeSingle();
+    if(error) throw error;
+    if(data&&data.state&&Array.isArray(data.state.items)){
+      state=data.state;
+      localStorage.setItem('inventory-system-data',JSON.stringify(state));
+    }else{
+      await supabase.from('inventory_app_state').upsert({id:1,state:state,updated_at:new Date().toISOString()},{onConflict:'id'});
+    }
+    cloudReady=true;
+    setSyncStatus('متصل — البيانات متزامنة','ok');
+  } catch(err) {
+    console.warn('السحابة غير متاحة، يتم العمل محلياً:', err);
+    setSyncStatus('وضع العمل المحلي','ok');
+  }
+  renderAll();
+}
 
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function n(v){return Number(v)||0}
 function current(item){return n(item.opening)+state.received.filter(x=>x.code===item.code).reduce((s,x)=>s+n(x.qty),0)-state.issued.filter(x=>x.code===item.code).reduce((s,x)=>s+n(x.qty),0)}
-function totalIn(){return state.received.reduce((s,x)=>s+n(x.qty),0)}function totalOut(){return state.issued.reduce((s,x)=>s+n(x.qty),0)}
+function totalIn(){return state.received.reduce((s,x)=>s+n(x.qty),0)}
+function totalOut(){return state.issued.reduce((s,x)=>s+n(x.qty),0)}
 function lowItems(){return state.items.filter(x=>current(x)<=n(x.reorder))}
 function status(item){return current(item)<=n(item.reorder)?'<span class="pill low">يحتاج إعادة طلب</span>':'<span class="pill">متوفر</span>'}
 function showPage(page){document.querySelectorAll('.page').forEach(x=>x.classList.add('hidden'));document.getElementById(page).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(x=>x.classList.toggle('active',x.dataset.page===page));document.getElementById('pageTitle').textContent=({dashboard:'لوحة التحكم',items:'الأصناف',received:'إذن إضافة مخزون',issued:'إذن صرف مخزون',alerts:'تنبيهات النواقص'})[page]}
 document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>showPage(b.dataset.page));
-function renderDashboard(){document.getElementById('mItems').textContent=state.items.length;document.getElementById('mLow').textContent=lowItems().length;document.getElementById('mIn').textContent=totalIn();document.getElementById('mOut').textContent=totalOut();
-document.getElementById('dashboardLow').innerHTML=lowItems().slice(0,8).map(x=>`<tr><td>${esc(x.code)}</td><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td>${current(x)}</td><td>${n(x.reorder)}</td><td>${status(x)}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">لا توجد أصناف ناقصة حاليًا</td></tr>';
-document.getElementById('recentIssued').innerHTML=[...state.issued].slice(-6).reverse().map(x=>`<tr><td>${esc(x.id)}</td><td>${esc(x.date)}</td><td>${esc(x.code)}</td><td>${esc(x.name||itemName(x.code))}</td><td>${n(x.qty)}</td><td>${esc(x.dest)}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">لا توجد حركات صرف</td></tr>'}
-function renderItems(){let q=(document.getElementById('itemSearch')?.value||'').toLowerCase(), f=document.getElementById('itemFilter')?.value||'all';let arr=state.items.filter(x=>([x.code,x.name,x.type].join(' ').toLowerCase().includes(q))&&(f==='all'||(f==='low'?current(x)<=n(x.reorder):current(x)>n(x.reorder))));document.getElementById('itemsBody').innerHTML=arr.map(x=>`<tr><td>${esc(x.code)}</td><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td>${esc(x.storage)}</td><td>${n(x.opening)}</td><td>${state.received.filter(t=>t.code===x.code).reduce((s,t)=>s+n(t.qty),0)}</td><td>${state.issued.filter(t=>t.code===x.code).reduce((s,t)=>s+n(t.qty),0)}</td><td><b>${current(x)}</b></td><td>${n(x.reorder)}</td><td>${status(x)}</td><td><button class="btn secondary small" onclick="openItemForm('${esc(x.code)}')">تعديل</button></td></tr>`).join('')||'<tr><td colspan="11" class="empty">لا توجد نتائج</td></tr>'}
-function renderTransactions(type){let arr=state[type], q=(document.getElementById(type+'Search')?.value||'').toLowerCase();arr=arr.filter(x=>JSON.stringify(x).toLowerCase().includes(q));let body=document.getElementById(type+'Body');if(type==='received')body.innerHTML=arr.slice().reverse().map(x=>`<tr><td>${esc(x.id)}</td><td>${esc(x.date)}</td><td>${esc(x.code)}</td><td>${esc(x.name||itemName(x.code))}</td><td>${esc(x.source)}</td><td>${n(x.qty)}</td><td>${esc(x.by)}</td><td>${esc(x.notes)}</td></tr>`).join('')||'<tr><td colspan="8" class="empty">لا توجد حركات وارد</td></tr>';else body.innerHTML=arr.slice().reverse().map(x=>`<tr><td>${esc(x.id)}</td><td>${esc(x.date)}</td><td>${esc(x.code)}</td><td>${esc(x.name||itemName(x.code))}</td><td>${esc(x.dest)}</td><td>${n(x.qty)}</td><td>${esc(x.by)}</td><td>${esc(x.approved)}</td><td>${esc(x.notes)}</td></tr>`).join('')||'<tr><td colspan="9" class="empty">لا توجد حركات صرف</td></tr>'}
-function renderAlerts(){document.getElementById('alertsBody').innerHTML=lowItems().map(x=>`<tr><td>${esc(x.code)}</td><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td>${current(x)}</td><td>${n(x.reorder)}</td><td>${Math.max(0,n(x.reorder)*2-current(x))}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">لا توجد أصناف ناقصة</td></tr>'}
+
+function renderDashboard(){
+  document.getElementById('mItems').textContent=state.items.length;
+  document.getElementById('mLow').textContent=lowItems().length;
+  document.getElementById('mIn').textContent=totalIn();
+  document.getElementById('mOut').textContent=totalOut();
+  document.getElementById('dashboardLow').innerHTML=lowItems().slice(0,8).map(x=>`<tr><td>${esc(x.code)}</td><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td>${current(x)}</td><td>${n(x.reorder)}</td><td>${status(x)}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">لا توجد أصناف ناقصة حاليًا</td></tr>';
+  document.getElementById('recentIssued').innerHTML=[...state.issued].slice(-6).reverse().map(x=>`<tr><td>${esc(x.id)}</td><td>${esc(x.date)}</td><td>${esc(x.code)}</td><td>${esc(x.name||itemName(x.code))}</td><td>${n(x.qty)}</td><td>${esc(x.dest)}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">لا توجد حركات صرف</td></tr>';
+}
+
+function renderItems(){
+  let q=(document.getElementById('itemSearch')?.value||'').toLowerCase(), f=document.getElementById('itemFilter')?.value||'all';
+  let arr=state.items.filter(x=>([x.code,x.name,x.type].join(' ').toLowerCase().includes(q))&&(f==='all'||(f==='low'?current(x)<=n(x.reorder):current(x)>n(x.reorder))));
+  document.getElementById('itemsBody').innerHTML=arr.map(x=>`<tr><td>${esc(x.code)}</td><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td>${esc(x.storage)}</td><td>${n(x.opening)}</td><td>${state.received.filter(t=>t.code===x.code).reduce((s,t)=>s+n(t.qty),0)}</td><td>${state.issued.filter(t=>t.code===x.code).reduce((s,t)=>s+n(t.qty),0)}</td><td><b>${current(x)}</b></td><td>${n(x.reorder)}</td><td>${status(x)}</td><td><button class="btn secondary small" onclick="openItemForm('${esc(x.code)}')">تعديل</button></td></tr>`).join('')||'<tr><td colspan="11" class="empty">لا توجد نتائج</td></tr>';
+}
+
+function renderTransactions(type){
+  let arr=state[type], q=(document.getElementById(type+'Search')?.value||'').toLowerCase();
+  arr=arr.filter(x=>JSON.stringify(x).toLowerCase().includes(q));
+  let body=document.getElementById(type+'Body');
+  if(type==='received') body.innerHTML=arr.slice().reverse().map(x=>`<tr><td>${esc(x.id)}</td><td>${esc(x.date)}</td><td>${esc(x.code)}</td><td>${esc(x.name||itemName(x.code))}</td><td>${esc(x.source)}</td><td>${n(x.qty)}</td><td>${esc(x.by)}</td><td>${esc(x.notes)}</td></tr>`).join('')||'<tr><td colspan="8" class="empty">لا توجد حركات وارد</td></tr>';
+  else body.innerHTML=arr.slice().reverse().map(x=>`<tr><td>${esc(x.id)}</td><td>${esc(x.date)}</td><td>${esc(x.code)}</td><td>${esc(x.name||itemName(x.code))}</td><td>${esc(x.dest)}</td><td>${n(x.qty)}</td><td>${esc(x.by)}</td><td>${esc(x.approved)}</td><td>${esc(x.notes)}</td></tr>`).join('')||'<tr><td colspan="9" class="empty">لا توجد حركات صرف</td></tr>';
+}
+
+function renderAlerts(){
+  document.getElementById('alertsBody').innerHTML=lowItems().map(x=>`<tr><td>${esc(x.code)}</td><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td>${current(x)}</td><td>${n(x.reorder)}</td><td>${Math.max(0,n(x.reorder)*2-current(x))}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">لا توجد أصناف ناقصة</td></tr>';
+}
+
 function itemName(code){return state.items.find(x=>x.code===code)?.name||''}
-function renderSelects(){document.querySelectorAll('.itemSelect').forEach(s=>{let old=s.value;s.innerHTML='<option value="">اختر الصنف</option>'+state.items.map(x=>`<option value="${esc(x.code)}">${esc(x.code)} — ${esc(x.name)}</option>`).join('');if(old)s.value=old})}
-function renderAll(){renderDashboard();renderItems();renderTransactions('received');renderTransactions('issued');renderAlerts();renderSelects()}
-function openItemForm(code){editCode=code||null;let form=document.getElementById('itemForm');form.reset();let x=state.items.find(i=>i.code===code);document.getElementById('itemFormTitle').textContent=x?'تعديل الصنف':'إضافة صنف';if(x)Object.keys(x).forEach(k=>{if(form.elements[k])form.elements[k].value=x[k]});form.elements.code.disabled=!!x;document.getElementById('itemFormPanel').classList.remove('hidden');document.getElementById('itemFormPanel').scrollIntoView({behavior:'smooth'})}
-function closeItemForm(){document.getElementById('itemFormPanel').classList.add('hidden');document.getElementById('itemForm').elements.code.disabled=false;editCode=null}
-document.getElementById('itemForm').onsubmit=e=>{e.preventDefault();let f=e.target, x={code:f.code.value.trim(),name:f.name.value.trim(),type:f.type.value.trim(),storage:f.storage.value.trim(),opening:n(f.opening.value),reorder:n(f.reorder.value),inBox:n(f.inBox.value),totalBox:n(f.opening.value)*n(f.inBox.value)};if(!editCode&&state.items.some(i=>i.code===x.code)){alert('كود الصنف موجود بالفعل');return}if(editCode)state.items=state.items.map(i=>i.code===editCode?x:i);else state.items.push(x);closeItemForm();save()};
-function bindTransaction(type){document.getElementById(type+'Form').onsubmit=e=>{e.preventDefault();let f=e.target, code=f.code.value, qty=n(f.qty.value), item=state.items.find(x=>x.code===code);if(!item)return;if(type==='issued'&&qty>current(item)){alert('الكمية المطلوبة أكبر من الرصيد الحالي ('+current(item)+')');return}let obj={id:f.id.value.trim()||String(Math.max(0,...state[type].map(x=>n(x.id)))+1),date:f.date.value,code,name:item.name,qty};if(type==='received')Object.assign(obj,{source:f.source.value.trim(),by:f.by.value.trim(),notes:f.notes.value.trim()});else Object.assign(obj,{dest:f.dest.value.trim(),by:f.by.value.trim(),approved:f.approved.value.trim(),notes:f.notes.value.trim()});state[type].push(obj);f.reset();f.elements.date.value=new Date().toISOString().slice(0,10);save();alert('تم حفظ الحركة بنجاح')}}
-bindTransaction('received');bindTransaction('issued');
+
+function renderSelects(){
+  document.querySelectorAll('.itemSelect').forEach(s=>{
+    let old=s.value;
+    s.innerHTML='<option value="">اختر الصنف</option>'+state.items.map(x=>`<option value="${esc(x.code)}">${esc(x.code)} — ${esc(x.name)}</option>`).join('');
+    if(old) s.value=old;
+  });
+}
+
+function renderAll(){
+  renderDashboard();
+  renderItems();
+  renderTransactions('received');
+  renderTransactions('issued');
+  renderAlerts();
+  renderSelects();
+}
+
+function openItemForm(code){
+  editCode=code||null;
+  let form=document.getElementById('itemForm');
+  form.reset();
+  let x=state.items.find(i=>i.code===code);
+  document.getElementById('itemFormTitle').textContent=x?'تعديل الصنف':'إضافة صنف';
+  if(x) Object.keys(x).forEach(k=>{if(form.elements[k])form.elements[k].value=x[k]});
+  form.elements.code.disabled=!!x;
+  document.getElementById('itemFormPanel').classList.remove('hidden');
+  document.getElementById('itemFormPanel').scrollIntoView({behavior:'smooth'});
+}
+
+function closeItemForm(){
+  document.getElementById('itemFormPanel').classList.add('hidden');
+  document.getElementById('itemForm').elements.code.disabled=false;
+  editCode=null;
+}
+
+document.getElementById('itemForm').onsubmit=e=>{
+  e.preventDefault();
+  let f=e.target, x={code:f.code.value.trim(),name:f.name.value.trim(),type:f.type.value.trim(),storage:f.storage.value.trim(),opening:n(f.opening.value),reorder:n(f.reorder.value),inBox:n(f.inBox.value),totalBox:n(f.opening.value)*n(f.inBox.value)};
+  if(!editCode&&state.items.some(i=>i.code===x.code)){alert('كود الصنف موجود بالفعل');return}
+  if(editCode) state.items=state.items.map(i=>i.code===editCode?x:i);
+  else state.items.push(x);
+  closeItemForm();
+  save();
+};
+
+function bindTransaction(type){
+  document.getElementById(type+'Form').onsubmit=e=>{
+    e.preventDefault();
+    let f=e.target, code=f.code.value, qty=n(f.qty.value), item=state.items.find(x=>x.code===code);
+    if(!item)return;
+    if(type==='issued'&&qty>current(item)){alert('الكمية المطلوبة أكبر من الرصيد الحالي ('+current(item)+')');return}
+    let obj={id:f.id.value.trim()||String(Math.max(0,...state[type].map(x=>n(x.id)))+1),date:f.date.value,code,name:item.name,qty};
+    if(type==='received') Object.assign(obj,{source:f.source.value.trim(),by:f.by.value.trim(),notes:f.notes.value.trim()});
+    else Object.assign(obj,{dest:f.dest.value.trim(),by:f.by.value.trim(),approved:f.approved.value.trim(),notes:f.notes.value.trim()});
+    state[type].push(obj);
+    f.reset();
+    f.elements.date.value=new Date().toISOString().slice(0,10);
+    save();
+    alert('تم حفظ الحركة بنجاح');
+  }
+}
+
+bindTransaction('received');
+bindTransaction('issued');
 ['receivedForm','issuedForm'].forEach(id=>document.getElementById(id).elements.date.value=new Date().toISOString().slice(0,10));
-document.getElementById('resetBtn').onclick=()=>{if(confirm('سيتم استبدال بيانات المخزن السحابية بالبيانات الأصلية المضمنة في الملف، وسيظهر ذلك على كل الأجهزة. هل تريد المتابعة؟')){state=JSON.parse(JSON.stringify(original));save()}};
-document.getElementById('exportBtn').onclick=()=>{let out=[['نوع','رقم','تاريخ','كود الصنف','اسم الصنف','الكمية','تفاصيل'],...state.items.map(x=>['صنف','', '',x.code,x.name,current(x),x.type]),...state.received.map(x=>['وارد',x.id,x.date,x.code,x.name,x.qty,x.source]),...state.issued.map(x=>['صرف',x.id,x.date,x.code,x.name,x.qty,x.dest])];let csv='\ufeff'+out.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));a.download='inventory-export.csv';a.click();URL.revokeObjectURL(a.href)};
+
+document.getElementById('resetBtn').onclick=()=>{
+  if(confirm('سيتم استبدال بيانات المخزن بالبيانات الأصلية المضمنة في الملف. هل تريد المتابعة؟')){
+    state=JSON.parse(JSON.stringify(original));
+    save();
+  }
+};
+
+document.getElementById('exportBtn').onclick=()=>{
+  let out=[['نوع','رقم','تاريخ','كود الصنف','اسم الصنف','الكمية','تفاصيل'],...state.items.map(x=>['صنف','', '',x.code,x.name,current(x),x.type]),...state.received.map(x=>['وارد',x.id,x.date,x.code,x.name,x.qty,x.source]),...state.issued.map(x=>['صرف',x.id,x.date,x.code,x.name,x.qty,x.dest])];
+  let csv='\ufeff'+out.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');
+  let a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));
+  a.download='inventory-export.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+// التشغيل المباشر وعرض البيانات فوراً
 renderAll();
+loadCloudState();
 </script></body></html>
