@@ -18,14 +18,32 @@ input,select,textarea{width:100%;padding:12px 13px;border:1px solid #dce4f1;bord
 @media(max-width:520px){.cards{grid-template-columns:1fr 1fr;gap:9px}.card{padding:13px}.metric{font-size:24px}.metric-label{font-size:11px;align-items:flex-start}.metric-label:before{width:28px;height:28px;flex-basis:28px}.form-grid{grid-template-columns:1fr}.top h1{font-size:21px}.panel{padding:14px}.btn{padding:10px 12px}.filters input,.filters select{max-width:none;flex:1}}
 
 .auth-screen{position:fixed;inset:0;z-index:9999;background:#f4f7fc;display:grid;place-items:center;padding:18px}.auth-card{width:min(100%,430px);background:#fff;border:1px solid #e3eaf5;border-radius:20px;padding:26px;box-shadow:0 15px 45px #15234a18}.auth-card h2{margin:0 0 8px}.auth-card .field{margin:16px 0}.auth-msg{font-size:13px;line-height:1.8;margin-top:12px;color:#b4233a}.sync-status{font-size:12px;color:#71809a;align-self:center}.sync-status.ok{color:#07845f}.sync-status.err{color:#b4233a}
+
+.auth-screen{position:fixed;inset:0;z-index:9999;background:linear-gradient(145deg,#e7edfc,#f7f9ff);display:grid;place-items:center;padding:18px}
+.auth-card{background:#fff;border:1px solid #dfe7f6;border-radius:20px;box-shadow:0 20px 55px #111a3520;width:min(100%,430px);padding:30px}
+.auth-card h2{margin:0 0 10px}.auth-card p{color:#71809a;font-size:13px;line-height:1.8}
+.auth-card label{margin-top:16px}.auth-card .btn{width:100%;margin-top:20px}
+.auth-msg{margin-top:15px;min-height:20px;color:#b4233a;font-size:13px;line-height:1.7}
 </style></head>
 <body>
-<div class="app" id="appRoot">
+<section class="auth-screen" id="authScreen">
+  <form class="auth-card" id="loginForm">
+    <h2>تسجيل دخول الموظفين</h2>
+    <p>مخزن شلل الأطفال — الحسابات يتم إنشاؤها بواسطة المسؤول فقط.</p>
+    <label for="loginEmail">البريد الإلكتروني</label>
+    <input id="loginEmail" type="email" autocomplete="username" required placeholder="name@example.com">
+    <label for="loginPassword">كلمة المرور</label>
+    <input id="loginPassword" type="password" autocomplete="current-password" required minlength="6" placeholder="كلمة المرور">
+    <button class="btn" id="loginBtn" type="submit">دخول</button>
+    <div id="authMessage" class="auth-msg" role="status"></div>
+  </form>
+</section>
+<div class="app hidden" id="appRoot">
 <aside class="side"><div class="brand"><span>مخزن شلل الأطفال <small>VACSERA</small></span></div><div class="subbrand">نظام إدارة ومتابعة مخزن شلل الأطفال</div>
 <nav class="nav">
 <button class="active" data-page="dashboard">لوحة التحكم</button><button data-page="items">الأصناف</button><button data-page="received">إذن إضافة مخزون</button><button data-page="issued">إذن صرف مخزون</button><button data-page="alerts">تنبيهات النواقص</button>
 </nav></aside>
-<main><div class="top"><div class="page-heading"><div class="vacsera-logo">VACSERA</div><div><div class="muted" style="font-weight:bold;color:#4169e1;margin-bottom:3px">مخزن شلل الأطفال</div><h1 id="pageTitle">لوحة التحكم</h1><div class="muted">متابعة الأصناف وحركة المخزون من مكان واحد</div></div></div><div class="filters"><span id="syncStatus" class="sync-status">في انتظار الاتصال…</span><button class="btn secondary" id="exportBtn">تصدير البيانات CSV</button><button class="btn secondary" id="resetBtn">إعادة بيانات الملف الأصلية</button></div></div>
+<main><div class="top"><div class="page-heading"><div class="vacsera-logo">VACSERA</div><div><div class="muted" style="font-weight:bold;color:#4169e1;margin-bottom:3px">مخزن شلل الأطفال</div><h1 id="pageTitle">لوحة التحكم</h1><div class="muted">متابعة الأصناف وحركة المخزون من مكان واحد</div></div></div><div class="filters"><span id="staffIdentity" class="sync-status"></span><button class="btn secondary" id="logoutBtn" type="button">تسجيل الخروج</button><span id="syncStatus" class="sync-status">في انتظار الاتصال…</span><button class="btn secondary" id="exportBtn">تصدير البيانات CSV</button><button class="btn secondary" id="resetBtn">إعادة بيانات الملف الأصلية</button></div></div>
 <div class="notice">البيانات محفوظة سحابيًا عبر Supabase، وتظهر التعديلات على الأجهزة الأخرى بعد المزامنة. احتفظ بنسخة CSV احتياطية بشكل دوري.</div>
 <section id="dashboard" class="page">
 <div class="cards"><div class="card"><div class="metric-label">إجمالي الأصناف</div><div class="metric blue" id="mItems">0</div></div><div class="card"><div class="metric-label">أصناف وصلت لحد الطلب</div><div class="metric red" id="mLow">0</div></div><div class="card"><div class="metric-label">إجمالي الوارد</div><div class="metric green" id="mIn">0</div></div><div class="card"><div class="metric-label">إجمالي المنصرف</div><div class="metric" id="mOut">0</div></div></div>
@@ -55,19 +73,20 @@ document.querySelectorAll('label').forEach(label => {
 });
 document.querySelectorAll('input[placeholder*="بحث"],input[placeholder*="ابحث"]').forEach(el => { if (!el.value) el.setAttribute('aria-label', el.placeholder); });
 
-let state = loadState(), editCode = null;
+let state = {items:[],received:[],issued:[]}, editCode = null;
 let cloudReady = false, applyingRemote = false, saveQueue = Promise.resolve(), realtimeChannel = null;
 function loadState(){try{return JSON.parse(localStorage.getItem('inventory-system-data'))||JSON.parse(JSON.stringify(original))}catch(e){return JSON.parse(JSON.stringify(original))}}
 function setSyncStatus(message, kind=''){const el=document.getElementById('syncStatus');if(el){el.textContent=message;el.className='sync-status '+kind}}
-function save(){localStorage.setItem('inventory-system-data',JSON.stringify(state));renderAll();if(cloudReady&&!applyingRemote){const snapshot=JSON.parse(JSON.stringify(state));saveQueue=saveQueue.then(async()=>{const {error}=await inventoryDbClient.from('inventory_app_state').upsert({id:1,state:snapshot,updated_at:new Date().toISOString()},{onConflict:'id'});if(error){console.error(error);setSyncStatus('تعذرت المزامنة — تحقق من الاتصال','err');alert('تم حفظ التعديل على هذا الجهاز، لكن لم تتم المزامنة السحابية. '+error.message)}else setSyncStatus('تمت المزامنة السحابية','ok')}).catch(err=>{console.error(err);setSyncStatus('خطأ في المزامنة','err')})}}
+function save(){if(!cloudReady){alert('لا يمكن حفظ التغييرات بدون الاتصال الآمن بقاعدة البيانات');return;}localStorage.setItem('inventory-system-data',JSON.stringify(state));renderAll();if(cloudReady&&!applyingRemote){const snapshot=JSON.parse(JSON.stringify(state));saveQueue=saveQueue.then(async()=>{const {error}=await inventoryDbClient.from('inventory_app_state').upsert({id:1,state:snapshot,updated_at:new Date().toISOString()},{onConflict:'id'});if(error){console.error(error);setSyncStatus('تعذرت المزامنة — تحقق من الاتصال','err');alert('تم حفظ التعديل على هذا الجهاز، لكن لم تتم المزامنة السحابية. '+error.message)}else setSyncStatus('تمت المزامنة السحابية','ok')}).catch(err=>{console.error(err);setSyncStatus('خطأ في المزامنة','err')})}}
 async function loadCloudState(){
   setSyncStatus('جاري تحميل بيانات المخزن…');
   const {data,error}=await inventoryDbClient.from('inventory_app_state').select('state').eq('id',1).maybeSingle();
   if(error)throw error;
   if(data&&data.state&&Array.isArray(data.state.items)){
-    localStorage.setItem('inventory-system-backup-before-cloud',JSON.stringify(loadState()));
+    // Cloud is authoritative; no previous-user local backup is used.
     state=data.state;localStorage.setItem('inventory-system-data',JSON.stringify(state));
   }else{
+    state=JSON.parse(JSON.stringify(original));
     const {error:insertError}=await inventoryDbClient.from('inventory_app_state').upsert({id:1,state:state,updated_at:new Date().toISOString()},{onConflict:'id'});
     if(insertError)throw insertError;
   }
@@ -78,25 +97,64 @@ async function loadCloudState(){
     applyingRemote=true;state=payload.new.state;localStorage.setItem('inventory-system-data',JSON.stringify(state));renderAll();applyingRemote=false;setSyncStatus('تم تحديث البيانات من جهاز آخر','ok');
   }).subscribe(status=>{if(status==='CHANNEL_ERROR'||status==='TIMED_OUT')setSyncStatus('الاتصال المباشر متوقف؛ ستظل البيانات محفوظة عند الحفظ','err')});
 }
-async function startWithoutLogin(){
-  // Open the app immediately. A background anonymous Supabase session can sync
-  // without asking the user for an email/password, if Anonymous Sign-ins are enabled.
-  setSyncStatus('جاري الاتصال بقاعدة البيانات…');
-  try{
-    const {data:sessionData,error:sessionError}=await inventoryDbClient.auth.getSession();
-    if(sessionError)throw sessionError;
-    if(!sessionData.session){
-      const {error}=await inventoryDbClient.auth.signInAnonymously();
-      if(error)throw error;
-    }
-    await loadCloudState();
-  }catch(err){
-    console.error(err);cloudReady=false;
-    setSyncStatus('الموقع مفتوح، لكن المزامنة غير متاحة — راجعي إعدادات Supabase','err');
-    console.warn('Cloud sync is unavailable. Data will be stored only on this device until Supabase anonymous sign-in and table permissions are configured.',err.message||err);
-  }
+function showLogin(message=''){
+  cloudReady=false;
+  document.getElementById('appRoot').classList.add('hidden');
+  document.getElementById('authScreen').classList.remove('hidden');
+  document.getElementById('authMessage').textContent=message;
+  document.getElementById('loginPassword').value='';
 }
-startWithoutLogin();
+function showApp(user){
+  document.getElementById('authScreen').classList.add('hidden');
+  document.getElementById('appRoot').classList.remove('hidden');
+  document.getElementById('staffIdentity').textContent=user.email||'موظف';
+}
+async function initAuth(){
+  try{
+    const {data,error}=await inventoryDbClient.auth.getUser();
+    if(error && !/session missing/i.test(error.message||''))console.warn(error);
+    const user=data?.user;
+    if(!user || user.is_anonymous || user.app_metadata?.provider==='anonymous'){
+      if(user)await inventoryDbClient.auth.signOut();
+      showLogin();return;
+    }
+    // Server authorization, not just a hidden login screen.
+    const {data:staff,error:staffError}=await inventoryDbClient.from('inventory_staff').select('user_id').eq('user_id',user.id).maybeSingle();
+    if(staffError || !staff){showLogin('الحساب غير مفعل للمخزن. تواصل مع المسؤول.');return;}
+    try{
+      await loadCloudState();
+      showApp(user);
+    }catch(err){
+      console.error(err);
+      showLogin('تعذر تحميل بيانات المخزن. تحقق من الصلاحيات والاتصال.');
+    }
+  }catch(err){console.error(err);showLogin('تعذر الاتصال بخدمة تسجيل الدخول.');}
+}
+document.getElementById('loginForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const btn=document.getElementById('loginBtn');
+  btn.disabled=true;btn.textContent='جاري التحقق…';
+  document.getElementById('authMessage').textContent='';
+  try{
+    const {error}=await inventoryDbClient.auth.signInWithPassword({
+      email:document.getElementById('loginEmail').value.trim(),
+      password:document.getElementById('loginPassword').value
+    });
+    if(error)throw error;
+    await initAuth();
+  }catch(err){document.getElementById('authMessage').textContent='تعذر تسجيل الدخول. تحقق من بيانات الحساب أو تواصل مع المسؤول.';console.error(err)}
+  finally{btn.disabled=false;btn.textContent='دخول'}
+});
+document.getElementById('logoutBtn').addEventListener('click',async()=>{
+  cloudReady=false;
+  try{if(realtimeChannel){await inventoryDbClient.removeChannel(realtimeChannel);realtimeChannel=null;}await inventoryDbClient.auth.signOut();}
+  finally{
+    localStorage.removeItem('inventory-system-data');
+    localStorage.removeItem('inventory-system-backup-before-cloud');
+    state={items:[],received:[],issued:[]};renderAll();showLogin('تم تسجيل الخروج.');
+  }
+});
+initAuth();
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function n(v){return Number(v)||0}
 function current(item){return n(item.opening)+state.received.filter(x=>x.code===item.code).reduce((s,x)=>s+n(x.qty),0)-state.issued.filter(x=>x.code===item.code).reduce((s,x)=>s+n(x.qty),0)}
